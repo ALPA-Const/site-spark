@@ -1,21 +1,49 @@
 import { motion } from "framer-motion";
-import { ArrowRight, Code, Download, Eye, Palette, RefreshCw, Type } from "lucide-react";
+import { ArrowRight, Code, Copy, Download, Eye, Palette, RefreshCw, Type, Check, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
+import { CrawlResult, GenerateResult, replicaApi } from "@/lib/api/replica";
 
 interface GeneratedPreviewProps {
-  url: string;
+  crawlData: CrawlResult['data'];
+  generatedData: GenerateResult['data'];
   onReset: () => void;
 }
 
-const GeneratedPreview = ({ url, onReset }: GeneratedPreviewProps) => {
+const GeneratedPreview = ({ crawlData, generatedData, onReset }: GeneratedPreviewProps) => {
   const [activeTab, setActiveTab] = useState<"preview" | "code">("preview");
+  const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
 
-  const extractedData = {
-    colors: ["#06B6D4", "#8B5CF6", "#0F172A", "#1E293B", "#F8FAFC"],
-    fonts: ["Inter", "Space Grotesk"],
-    sections: ["Hero", "Features", "Testimonials", "CTA", "Footer"],
+  const handleCopyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(generatedData.pageCode);
+      setCopied(true);
+      toast({ title: "Copied!", description: "Code copied to clipboard" });
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to copy code", variant: "destructive" });
+    }
   };
+
+  const handleExport = () => {
+    const projectData = replicaApi.generateExportZip(generatedData);
+    const blob = new Blob([projectData], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'generated-site-project.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast({ title: "Exported!", description: "Project files downloaded" });
+  };
+
+  const extractedColors = crawlData?.extractedDesign?.colors || [];
+  const extractedFonts = crawlData?.extractedDesign?.fonts || [];
+  const detectedSections = generatedData?.sections || crawlData?.extractedDesign?.sections || [];
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -31,7 +59,7 @@ const GeneratedPreview = ({ url, onReset }: GeneratedPreviewProps) => {
         </div>
         <h2 className="text-3xl font-bold mb-2">Your Website is Ready</h2>
         <p className="text-muted-foreground">
-          We've analyzed and recreated a similar structure. Review, edit, and export.
+          Analyzed <span className="text-primary">{crawlData?.title}</span> and generated a similar structure.
         </p>
       </motion.div>
 
@@ -43,21 +71,39 @@ const GeneratedPreview = ({ url, onReset }: GeneratedPreviewProps) => {
           transition={{ delay: 0.1 }}
           className="lg:col-span-1 space-y-4"
         >
+          {/* Original Site Info */}
+          <div className="glass rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <ExternalLink className="w-4 h-4 text-primary" />
+              <span className="text-sm font-medium">Original Site</span>
+            </div>
+            <p className="text-xs text-muted-foreground truncate mb-2">{crawlData?.url}</p>
+            {crawlData?.screenshot && (
+              <img 
+                src={crawlData.screenshot} 
+                alt="Original site screenshot" 
+                className="w-full h-24 object-cover rounded-lg border border-border/50"
+              />
+            )}
+          </div>
+
           {/* Colors */}
           <div className="glass rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <Palette className="w-4 h-4 text-primary" />
-              <span className="text-sm font-medium">Colors</span>
+              <span className="text-sm font-medium">Extracted Colors</span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {extractedData.colors.map((color, i) => (
+              {extractedColors.length > 0 ? extractedColors.map((color, i) => (
                 <div
                   key={i}
                   className="w-8 h-8 rounded-lg border border-border/50 cursor-pointer hover:scale-110 transition-transform"
                   style={{ backgroundColor: color }}
                   title={color}
                 />
-              ))}
+              )) : (
+                <span className="text-xs text-muted-foreground">No colors detected</span>
+              )}
             </div>
           </div>
 
@@ -68,7 +114,7 @@ const GeneratedPreview = ({ url, onReset }: GeneratedPreviewProps) => {
               <span className="text-sm font-medium">Typography</span>
             </div>
             <div className="space-y-2">
-              {extractedData.fonts.map((font, i) => (
+              {extractedFonts.map((font, i) => (
                 <div key={i} className="text-sm text-muted-foreground px-2 py-1 bg-secondary/50 rounded">
                   {font}
                 </div>
@@ -80,10 +126,10 @@ const GeneratedPreview = ({ url, onReset }: GeneratedPreviewProps) => {
           <div className="glass rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <Code className="w-4 h-4 text-primary" />
-              <span className="text-sm font-medium">Sections</span>
+              <span className="text-sm font-medium">Detected Sections</span>
             </div>
             <div className="space-y-2">
-              {extractedData.sections.map((section, i) => (
+              {detectedSections.map((section, i) => (
                 <div key={i} className="flex items-center gap-2 text-sm text-muted-foreground">
                   <span className="w-1.5 h-1.5 rounded-full bg-primary" />
                   {section}
@@ -132,7 +178,13 @@ const GeneratedPreview = ({ url, onReset }: GeneratedPreviewProps) => {
                 <RefreshCw className="w-4 h-4 mr-2" />
                 New URL
               </Button>
-              <Button variant="hero" size="sm">
+              {activeTab === "code" && (
+                <Button variant="outline" size="sm" onClick={handleCopyCode}>
+                  {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
+                  {copied ? "Copied" : "Copy"}
+                </Button>
+              )}
+              <Button variant="hero" size="sm" onClick={handleExport}>
                 <Download className="w-4 h-4 mr-2" />
                 Export
               </Button>
@@ -157,38 +209,41 @@ const GeneratedPreview = ({ url, onReset }: GeneratedPreviewProps) => {
 
             {/* Preview Content */}
             {activeTab === "preview" ? (
-              <div className="bg-[#0f172a] min-h-[500px] p-8">
-                {/* Mock Generated Site Preview */}
-                <div className="max-w-4xl mx-auto space-y-8">
-                  {/* Nav */}
-                  <div className="flex items-center justify-between">
-                    <div className="w-32 h-8 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg" />
+              <div className="bg-background min-h-[500px] p-4 overflow-auto">
+                {/* Render a visual representation of the generated structure */}
+                <div className="max-w-4xl mx-auto space-y-6">
+                  {/* Nav mockup */}
+                  <div className="flex items-center justify-between p-4 rounded-lg" style={{ backgroundColor: extractedColors[2] || '#1e293b' }}>
+                    <div className="w-32 h-8 rounded-lg" style={{ background: `linear-gradient(135deg, ${extractedColors[0] || '#06b6d4'}, ${extractedColors[1] || '#8b5cf6'})` }} />
                     <div className="flex items-center gap-4">
-                      <div className="w-16 h-4 bg-slate-700 rounded" />
-                      <div className="w-16 h-4 bg-slate-700 rounded" />
-                      <div className="w-20 h-8 bg-cyan-500 rounded-lg" />
+                      {['Features', 'Pricing', 'About'].map((item) => (
+                        <div key={item} className="px-3 py-1 text-xs text-muted-foreground">{item}</div>
+                      ))}
+                      <div className="px-4 py-2 rounded-lg text-xs" style={{ backgroundColor: extractedColors[0] || '#06b6d4', color: '#0f172a' }}>
+                        Get Started
+                      </div>
                     </div>
                   </div>
 
-                  {/* Hero */}
-                  <div className="text-center py-16 space-y-4">
-                    <div className="w-64 h-12 bg-gradient-to-r from-slate-600 to-slate-700 rounded-lg mx-auto" />
-                    <div className="w-96 h-6 bg-slate-700 rounded mx-auto" />
-                    <div className="w-80 h-4 bg-slate-800 rounded mx-auto" />
-                    <div className="flex items-center justify-center gap-4 mt-6">
-                      <div className="w-32 h-10 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg" />
-                      <div className="w-32 h-10 border border-slate-600 rounded-lg" />
+                  {/* Hero mockup */}
+                  <div className="text-center py-16 space-y-4 rounded-xl" style={{ backgroundColor: extractedColors[2] || '#0f172a' }}>
+                    <div className="w-96 h-12 mx-auto rounded-lg" style={{ background: `linear-gradient(135deg, ${extractedColors[0] || '#06b6d4'}40, ${extractedColors[1] || '#8b5cf6'}40)` }} />
+                    <div className="w-[500px] h-6 mx-auto rounded" style={{ backgroundColor: extractedColors[3] || '#334155' }} />
+                    <div className="w-80 h-4 mx-auto rounded" style={{ backgroundColor: extractedColors[3] || '#334155', opacity: 0.6 }} />
+                    <div className="flex items-center justify-center gap-4 mt-8">
+                      <div className="w-32 h-10 rounded-lg" style={{ background: `linear-gradient(135deg, ${extractedColors[0] || '#06b6d4'}, ${extractedColors[1] || '#8b5cf6'})` }} />
+                      <div className="w-32 h-10 rounded-lg border" style={{ borderColor: extractedColors[0] || '#06b6d4' }} />
                     </div>
                   </div>
 
-                  {/* Features Grid */}
-                  <div className="grid grid-cols-3 gap-6">
+                  {/* Features mockup */}
+                  <div className="grid grid-cols-3 gap-4">
                     {[1, 2, 3].map((i) => (
-                      <div key={i} className="bg-slate-800/50 rounded-xl p-6 space-y-3">
-                        <div className="w-12 h-12 bg-cyan-500/20 rounded-lg" />
-                        <div className="w-24 h-4 bg-slate-600 rounded" />
-                        <div className="w-full h-3 bg-slate-700 rounded" />
-                        <div className="w-3/4 h-3 bg-slate-700 rounded" />
+                      <div key={i} className="p-6 rounded-xl space-y-3" style={{ backgroundColor: `${extractedColors[2] || '#1e293b'}80` }}>
+                        <div className="w-12 h-12 rounded-lg" style={{ backgroundColor: `${extractedColors[0] || '#06b6d4'}20` }} />
+                        <div className="w-24 h-4 rounded" style={{ backgroundColor: extractedColors[3] || '#334155' }} />
+                        <div className="w-full h-3 rounded" style={{ backgroundColor: extractedColors[3] || '#334155', opacity: 0.5 }} />
+                        <div className="w-3/4 h-3 rounded" style={{ backgroundColor: extractedColors[3] || '#334155', opacity: 0.5 }} />
                       </div>
                     ))}
                   </div>
@@ -196,44 +251,8 @@ const GeneratedPreview = ({ url, onReset }: GeneratedPreviewProps) => {
               </div>
             ) : (
               <div className="bg-[#1e1e1e] min-h-[500px] p-6 font-mono text-sm overflow-auto">
-                <pre className="text-slate-300">
-                  <code>{`import React from 'react';
-
-const GeneratedPage = () => {
-  return (
-    <div className="min-h-screen bg-slate-900">
-      {/* Navigation */}
-      <nav className="px-6 py-4 flex justify-between">
-        <Logo />
-        <NavLinks />
-      </nav>
-
-      {/* Hero Section */}
-      <section className="py-20 text-center">
-        <h1 className="text-5xl font-bold bg-gradient-to-r 
-          from-cyan-400 to-purple-500 bg-clip-text text-transparent">
-          Your Headline Here
-        </h1>
-        <p className="mt-4 text-slate-400">
-          Supporting description text goes here.
-        </p>
-        <div className="mt-8 flex justify-center gap-4">
-          <Button variant="primary">Get Started</Button>
-          <Button variant="outline">Learn More</Button>
-        </div>
-      </section>
-
-      {/* Features Grid */}
-      <section className="py-16 grid grid-cols-3 gap-6">
-        {features.map((feature) => (
-          <FeatureCard key={feature.id} {...feature} />
-        ))}
-      </section>
-    </div>
-  );
-};
-
-export default GeneratedPage;`}</code>
+                <pre className="text-slate-300 whitespace-pre-wrap">
+                  <code>{generatedData?.pageCode || '// No code generated'}</code>
                 </pre>
               </div>
             )}
