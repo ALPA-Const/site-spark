@@ -4,34 +4,19 @@ import { useEffect, useState } from "react";
 
 interface AnalysisProgressProps {
   url: string;
+  currentStep: number;
 }
 
 const analysisSteps = [
-  { id: "crawl", label: "Crawling website", duration: 800 },
-  { id: "dom", label: "Analyzing DOM structure", duration: 600 },
-  { id: "css", label: "Extracting CSS tokens", duration: 700 },
-  { id: "layout", label: "Detecting layout patterns", duration: 500 },
-  { id: "components", label: "Identifying components", duration: 600 },
-  { id: "generate", label: "Generating new site", duration: 800 },
+  { id: 1, label: "Crawling website", phase: "crawl" },
+  { id: 2, label: "Analyzing DOM structure", phase: "crawl" },
+  { id: 3, label: "Extracting design tokens", phase: "crawl" },
+  { id: 4, label: "Detecting components", phase: "generate" },
+  { id: 5, label: "AI interpretation", phase: "generate" },
+  { id: 6, label: "Generating code", phase: "generate" },
 ];
 
-const AnalysisProgress = ({ url }: AnalysisProgressProps) => {
-  const [currentStep, setCurrentStep] = useState(0);
-  const [completedSteps, setCompletedSteps] = useState<string[]>([]);
-
-  useEffect(() => {
-    let totalDelay = 0;
-    
-    analysisSteps.forEach((step, index) => {
-      totalDelay += step.duration;
-      
-      setTimeout(() => {
-        setCurrentStep(index + 1);
-        setCompletedSteps(prev => [...prev, step.id]);
-      }, totalDelay);
-    });
-  }, []);
-
+const AnalysisProgress = ({ url, currentStep }: AnalysisProgressProps) => {
   return (
     <div className="max-w-lg mx-auto">
       <div className="glass-strong rounded-2xl p-8">
@@ -39,14 +24,17 @@ const AnalysisProgress = ({ url }: AnalysisProgressProps) => {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/20 mb-4 animate-pulse-glow">
             <Loader2 className="w-8 h-8 text-primary animate-spin" />
           </div>
-          <h3 className="text-xl font-semibold mb-2">Analyzing Website</h3>
+          <h3 className="text-xl font-semibold mb-2">
+            {currentStep <= 3 ? "Crawling & Analyzing" : "Generating Website"}
+          </h3>
           <p className="text-sm text-muted-foreground truncate max-w-xs mx-auto">{url}</p>
         </div>
 
         <div className="space-y-3">
           {analysisSteps.map((step, index) => {
-            const isCompleted = completedSteps.includes(step.id);
-            const isActive = currentStep === index;
+            const isCompleted = currentStep > step.id;
+            const isActive = currentStep === step.id || 
+              (currentStep >= step.id && currentStep < step.id + 1);
             
             return (
               <motion.div
@@ -71,12 +59,15 @@ const AnalysisProgress = ({ url }: AnalysisProgressProps) => {
                   ) : isActive ? (
                     <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
                   ) : (
-                    <span className="text-xs text-muted-foreground">{index + 1}</span>
+                    <span className="text-xs text-muted-foreground">{step.id}</span>
                   )}
                 </div>
                 <span className={`text-sm ${isCompleted || isActive ? "text-foreground" : "text-muted-foreground"}`}>
                   {step.label}
                 </span>
+                {isActive && (
+                  <Loader2 className="w-4 h-4 text-primary animate-spin ml-auto" />
+                )}
               </motion.div>
             );
           })}

@@ -1,42 +1,101 @@
 import { motion } from "framer-motion";
-import { Globe, Zap, Code, Palette, ArrowRight, Sparkles, Layers, Download } from "lucide-react";
+import { Globe, Zap, Code, Palette, ArrowRight, Sparkles, Layers, Download, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 import AnalysisProgress from "@/components/AnalysisProgress";
 import FeatureCard from "@/components/FeatureCard";
 import GeneratedPreview from "@/components/GeneratedPreview";
+import { replicaApi, CrawlResult, GenerateResult, GenerateOptions } from "@/lib/api/replica";
 
 const Index = () => {
   const [url, setUrl] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisComplete, setAnalysisComplete] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [crawlData, setCrawlData] = useState<CrawlResult['data'] | null>(null);
+  const [generatedData, setGeneratedData] = useState<GenerateResult['data'] | null>(null);
+  const [options, setOptions] = useState<GenerateOptions>({
+    landingPageOnly: true,
+    multiPage: false,
+    mobileFirst: true,
+    darkMode: false,
+  });
+  const { toast } = useToast();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url) return;
     
     setIsAnalyzing(true);
     setAnalysisComplete(false);
-    
-    // Simulate analysis process
-    setTimeout(() => {
+    setCrawlData(null);
+    setGeneratedData(null);
+    setCurrentStep(0);
+
+    try {
+      // Step 1-3: Crawl the website
+      setCurrentStep(1);
+      const crawlResult = await replicaApi.crawlWebsite(url);
+      
+      if (!crawlResult.success || !crawlResult.data) {
+        throw new Error(crawlResult.error || 'Failed to crawl website');
+      }
+
+      setCrawlData(crawlResult.data);
+      setCurrentStep(4);
+
+      // Step 4-6: Generate the website
+      const generateResult = await replicaApi.generateWebsite(crawlResult.data, options);
+      
+      if (!generateResult.success || !generateResult.data) {
+        throw new Error(generateResult.error || 'Failed to generate website');
+      }
+
+      setGeneratedData(generateResult.data);
+      setCurrentStep(6);
+
+      // Small delay to show completion
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       setIsAnalyzing(false);
       setAnalysisComplete(true);
-    }, 4000);
+      
+      toast({
+        title: "Website Generated!",
+        description: `Successfully analyzed and replicated ${crawlResult.data.title}`,
+      });
+
+    } catch (error) {
+      console.error('Error:', error);
+      setIsAnalyzing(false);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : 'Failed to process website',
+        variant: "destructive",
+      });
+    }
   };
 
   const handleReset = () => {
     setUrl("");
     setIsAnalyzing(false);
     setAnalysisComplete(false);
+    setCrawlData(null);
+    setGeneratedData(null);
+    setCurrentStep(0);
+  };
+
+  const handleOptionChange = (key: keyof GenerateOptions) => {
+    setOptions(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   const features = [
     {
       icon: Globe,
       title: "Smart Crawling",
-      description: "Intelligent DOM analysis extracts layout, typography, and color systems automatically.",
+      description: "Intelligent DOM analysis extracts layout, typography, and color systems automatically via Firecrawl.",
     },
     {
       icon: Palette,
@@ -51,12 +110,12 @@ const Index = () => {
     {
       icon: Code,
       title: "Clean Code Output",
-      description: "Generates production-ready React/Next.js with Tailwind CSS architecture.",
+      description: "Generates production-ready React/TypeScript with Tailwind CSS architecture.",
     },
     {
       icon: Sparkles,
       title: "AI Interpretation",
-      description: "LLM transforms raw data into semantic components with placeholder content.",
+      description: "LLM transforms raw data into semantic components with original placeholder content.",
     },
     {
       icon: Download,
@@ -168,10 +227,23 @@ const Index = () => {
                 
                 {/* Options */}
                 <div className="flex flex-wrap items-center justify-center gap-4 mt-6">
-                  {["Landing Page Only", "Multi-page", "Mobile-first", "Dark Mode"].map((option) => (
-                    <label key={option} className="flex items-center gap-2 cursor-pointer group">
-                      <input type="checkbox" className="w-4 h-4 rounded border-border bg-input accent-primary" />
-                      <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">{option}</span>
+                  {[
+                    { key: 'landingPageOnly', label: 'Landing Page Only' },
+                    { key: 'multiPage', label: 'Multi-page' },
+                    { key: 'mobileFirst', label: 'Mobile-first' },
+                    { key: 'darkMode', label: 'Dark Mode' },
+                  ].map((option) => (
+                    <label key={option.key} className="flex items-center gap-2 cursor-pointer group">
+                      <input 
+                        type="checkbox" 
+                        checked={options[option.key as keyof GenerateOptions]}
+                        onChange={() => handleOptionChange(option.key as keyof GenerateOptions)}
+                        className="w-4 h-4 rounded border-border bg-input accent-primary"
+                        disabled={isAnalyzing}
+                      />
+                      <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                        {option.label}
+                      </span>
                     </label>
                   ))}
                 </div>
@@ -185,18 +257,22 @@ const Index = () => {
                 animate={{ opacity: 1, scale: 1 }}
                 className="mt-12"
               >
-                <AnalysisProgress url={url} />
+                <AnalysisProgress url={url} currentStep={currentStep} />
               </motion.div>
             )}
 
             {/* Generated Preview */}
-            {analysisComplete && (
+            {analysisComplete && generatedData && crawlData && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="mt-8"
               >
-                <GeneratedPreview url={url} onReset={handleReset} />
+                <GeneratedPreview 
+                  crawlData={crawlData}
+                  generatedData={generatedData}
+                  onReset={handleReset} 
+                />
               </motion.div>
             )}
           </div>
@@ -253,8 +329,8 @@ const Index = () => {
                     Transform any website into your own custom-built foundation. 
                     Start creating in seconds.
                   </p>
-                  <Button variant="hero" size="xl">
-                    Try It Free <ArrowRight className="w-5 h-5" />
+                  <Button variant="hero" size="xl" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+                    Try It Now <ArrowRight className="w-5 h-5" />
                   </Button>
                 </div>
               </motion.div>
