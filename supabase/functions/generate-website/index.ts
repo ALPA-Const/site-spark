@@ -6,6 +6,113 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Input validation types and functions
+interface GenerateOptions {
+  landingPageOnly?: boolean;
+  multiPage?: boolean;
+  mobileFirst?: boolean;
+  darkMode?: boolean;
+}
+
+interface CrawlData {
+  url?: string;
+  title?: string;
+  description?: string;
+  markdown?: string;
+  extractedDesign?: {
+    colors?: string[];
+    fonts?: string[];
+    sections?: string[];
+  };
+  screenshot?: string;
+}
+
+function validateOptions(options: unknown): GenerateOptions {
+  const defaults: GenerateOptions = {
+    landingPageOnly: true,
+    multiPage: false,
+    mobileFirst: true,
+    darkMode: false,
+  };
+
+  if (!options || typeof options !== 'object') {
+    return defaults;
+  }
+
+  const validated: GenerateOptions = { ...defaults };
+  const opts = options as Record<string, unknown>;
+
+  if ('landingPageOnly' in opts && typeof opts.landingPageOnly === 'boolean') {
+    validated.landingPageOnly = opts.landingPageOnly;
+  }
+  if ('multiPage' in opts && typeof opts.multiPage === 'boolean') {
+    validated.multiPage = opts.multiPage;
+  }
+  if ('mobileFirst' in opts && typeof opts.mobileFirst === 'boolean') {
+    validated.mobileFirst = opts.mobileFirst;
+  }
+  if ('darkMode' in opts && typeof opts.darkMode === 'boolean') {
+    validated.darkMode = opts.darkMode;
+  }
+
+  return validated;
+}
+
+function validateCrawlData(data: unknown): { valid: boolean; error?: string; data?: CrawlData } {
+  if (!data || typeof data !== 'object') {
+    return { valid: false, error: 'Crawl data must be an object' };
+  }
+
+  const crawlData = data as Record<string, unknown>;
+
+  // Validate required extractedDesign
+  if (!crawlData.extractedDesign || typeof crawlData.extractedDesign !== 'object') {
+    return { valid: false, error: 'Missing or invalid extractedDesign' };
+  }
+
+  const design = crawlData.extractedDesign as Record<string, unknown>;
+
+  // Validate arrays in extractedDesign
+  const colors = Array.isArray(design.colors) 
+    ? design.colors.filter((c): c is string => typeof c === 'string').slice(0, 20)
+    : [];
+  const fonts = Array.isArray(design.fonts)
+    ? design.fonts.filter((f): f is string => typeof f === 'string').slice(0, 10)
+    : [];
+  const sections = Array.isArray(design.sections)
+    ? design.sections.filter((s): s is string => typeof s === 'string').slice(0, 20)
+    : [];
+
+  // Validate and sanitize string fields
+  const title = typeof crawlData.title === 'string' 
+    ? crawlData.title.substring(0, 200) 
+    : 'Untitled';
+  const description = typeof crawlData.description === 'string'
+    ? crawlData.description.substring(0, 1000)
+    : '';
+  const url = typeof crawlData.url === 'string'
+    ? crawlData.url.substring(0, 2048)
+    : '';
+  const markdown = typeof crawlData.markdown === 'string'
+    ? crawlData.markdown.substring(0, 50000)
+    : '';
+  const screenshot = typeof crawlData.screenshot === 'string'
+    ? crawlData.screenshot.substring(0, 500000) // Base64 images can be large
+    : undefined;
+
+  return {
+    valid: true,
+    data: {
+      url,
+      title,
+      description,
+      markdown,
+      screenshot,
+      extractedDesign: { colors, fonts, sections },
+    },
+  };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -39,14 +146,31 @@ serve(async (req) => {
 
     console.log('Authenticated user:', user.id);
 
-    const { crawlData, options } = await req.json();
-
-    if (!crawlData) {
+    // Parse and validate input
+    let rawBody;
+    try {
+      rawBody = await req.json();
+    } catch {
       return new Response(
-        JSON.stringify({ success: false, error: 'Crawl data is required' }),
+        JSON.stringify({ success: false, error: 'Invalid JSON body' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    const { crawlData: rawCrawlData, options: rawOptions } = rawBody;
+
+    // Validate crawl data
+    const crawlValidation = validateCrawlData(rawCrawlData);
+    if (!crawlValidation.valid || !crawlValidation.data) {
+      console.error('Crawl data validation failed:', crawlValidation.error);
+      return new Response(
+        JSON.stringify({ success: false, error: crawlValidation.error || 'Invalid crawl data' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const crawlData = crawlValidation.data;
+    const options = validateOptions(rawOptions);
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     if (!LOVABLE_API_KEY) {
@@ -57,11 +181,13 @@ serve(async (req) => {
       );
     }
 
-    console.log('Generating website from crawl data...');
+    console.log('Generating website from validated crawl data...');
     console.log('Design data:', crawlData.extractedDesign);
-    console.log('Options:', options);
+    console.log('Validated options:', options);
 
-    const { colors, fonts, sections } = crawlData.extractedDesign;
+    const colors = crawlData.extractedDesign?.colors || [];
+    const fonts = crawlData.extractedDesign?.fonts || [];
+    const sections = crawlData.extractedDesign?.sections || [];
     const markdown = crawlData.markdown?.substring(0, 8000) || '';
 
     const systemPrompt = `You are an elite frontend architect who generates production-ready React code. You create beautiful, responsive websites inspired by analyzed designs but with ORIGINAL content.
