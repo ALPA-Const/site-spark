@@ -43,6 +43,21 @@ export interface GenerateResult {
   };
 }
 
+export interface Project {
+  id: string;
+  user_id: string;
+  name: string;
+  original_url: string;
+  original_title: string | null;
+  screenshot: string | null;
+  generated_code: string | null;
+  design_tokens: Record<string, any> | null;
+  sections: string[] | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export const replicaApi = {
   async crawlWebsite(url: string): Promise<CrawlResult> {
     console.log('Crawling website:', url);
@@ -72,6 +87,73 @@ export const replicaApi = {
     }
 
     return data;
+  },
+
+  async saveProject(projectData: {
+    name: string;
+    originalUrl: string;
+    originalTitle?: string;
+    screenshot?: string | null;
+    generatedCode?: string;
+    designTokens?: Record<string, any>;
+    sections?: string[];
+  }): Promise<{ success: boolean; error?: string; project?: Project }> {
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const { data, error } = await supabase
+      .from('projects')
+      .insert({
+        user_id: user.id,
+        name: projectData.name,
+        original_url: projectData.originalUrl,
+        original_title: projectData.originalTitle || null,
+        screenshot: projectData.screenshot || null,
+        generated_code: projectData.generatedCode || null,
+        design_tokens: projectData.designTokens || null,
+        sections: projectData.sections || null,
+        status: 'completed',
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Save project error:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, project: data as Project };
+  },
+
+  async getProjects(): Promise<{ success: boolean; error?: string; projects?: Project[] }> {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Get projects error:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, projects: data as Project[] };
+  },
+
+  async deleteProject(projectId: string): Promise<{ success: boolean; error?: string }> {
+    const { error } = await supabase
+      .from('projects')
+      .delete()
+      .eq('id', projectId);
+
+    if (error) {
+      console.error('Delete project error:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
   },
 
   generateExportZip(generatedData: GenerateResult['data']): string {

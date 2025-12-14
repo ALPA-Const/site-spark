@@ -1,9 +1,11 @@
 import { motion } from "framer-motion";
-import { Globe, Zap, Code, Palette, ArrowRight, Sparkles, Layers, Download, AlertCircle } from "lucide-react";
+import { Globe, Zap, Code, Palette, ArrowRight, Sparkles, Layers, Download, LogOut, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import AnalysisProgress from "@/components/AnalysisProgress";
 import FeatureCard from "@/components/FeatureCard";
 import GeneratedPreview from "@/components/GeneratedPreview";
@@ -22,11 +24,25 @@ const Index = () => {
     mobileFirst: true,
     darkMode: false,
   });
+  
   const { toast } = useToast();
+  const { user, loading, signOut } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url) return;
+    
+    // Require authentication
+    if (!user) {
+      toast({
+        title: "Sign in required",
+        description: "Please sign in to generate websites",
+        variant: "destructive",
+      });
+      navigate('/auth');
+      return;
+    }
     
     setIsAnalyzing(true);
     setAnalysisComplete(false);
@@ -56,6 +72,21 @@ const Index = () => {
       setGeneratedData(generateResult.data);
       setCurrentStep(6);
 
+      // Save project to database
+      const saveResult = await replicaApi.saveProject({
+        name: crawlResult.data.title || 'Untitled Project',
+        originalUrl: url,
+        originalTitle: crawlResult.data.title,
+        screenshot: crawlResult.data.screenshot,
+        generatedCode: generateResult.data.pageCode,
+        designTokens: generateResult.data.designTokens,
+        sections: generateResult.data.sections,
+      });
+
+      if (!saveResult.success) {
+        console.warn('Failed to save project:', saveResult.error);
+      }
+
       // Small delay to show completion
       await new Promise(resolve => setTimeout(resolve, 500));
       
@@ -70,9 +101,23 @@ const Index = () => {
     } catch (error) {
       console.error('Error:', error);
       setIsAnalyzing(false);
+      
+      const errorMessage = error instanceof Error ? error.message : 'Failed to process website';
+      
+      // Handle auth errors specifically
+      if (errorMessage.includes('Unauthorized') || errorMessage.includes('authorization')) {
+        toast({
+          title: "Session expired",
+          description: "Please sign in again to continue",
+          variant: "destructive",
+        });
+        navigate('/auth');
+        return;
+      }
+      
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : 'Failed to process website',
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -89,6 +134,14 @@ const Index = () => {
 
   const handleOptionChange = (key: keyof GenerateOptions) => {
     setOptions(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    toast({
+      title: "Signed out",
+      description: "You have been signed out successfully",
+    });
   };
 
   const features = [
@@ -154,7 +207,29 @@ const Index = () => {
           >
             <Button variant="ghost" size="sm">How it Works</Button>
             <Button variant="ghost" size="sm">Pricing</Button>
-            <Button variant="outline" size="sm">Sign In</Button>
+            
+            {loading ? (
+              <Button variant="outline" size="sm" disabled>
+                Loading...
+              </Button>
+            ) : user ? (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/50">
+                  <User className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground max-w-32 truncate">
+                    {user.email}
+                  </span>
+                </div>
+                <Button variant="outline" size="sm" onClick={handleSignOut}>
+                  <LogOut className="w-4 h-4 mr-1" />
+                  Sign Out
+                </Button>
+              </div>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => navigate('/auth')}>
+                Sign In
+              </Button>
+            )}
           </motion.div>
         </nav>
       </header>
@@ -247,6 +322,16 @@ const Index = () => {
                     </label>
                   ))}
                 </div>
+                
+                {/* Auth hint */}
+                {!user && !loading && (
+                  <p className="text-sm text-muted-foreground mt-4">
+                    <Button variant="link" className="p-0 h-auto" onClick={() => navigate('/auth')}>
+                      Sign in
+                    </Button>
+                    {" "}to save your generated websites
+                  </p>
+                )}
               </motion.form>
             )}
 
