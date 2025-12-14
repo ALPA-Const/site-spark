@@ -6,6 +6,74 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// SSRF protection: validate URL is a public internet address
+function isValidPublicUrl(urlString: string): { valid: boolean; error?: string } {
+  try {
+    const url = new URL(urlString);
+    
+    // Only allow HTTP/HTTPS protocols
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      return { valid: false, error: 'Only HTTP/HTTPS protocols allowed' };
+    }
+    
+    const hostname = url.hostname.toLowerCase();
+    
+    // Block localhost variations
+    if (['localhost', '127.0.0.1', '::1', '0.0.0.0', '[::1]'].includes(hostname)) {
+      return { valid: false, error: 'Localhost access not allowed' };
+    }
+    
+    // Block private IP ranges
+    const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+    const ipMatch = hostname.match(ipv4Regex);
+    if (ipMatch) {
+      const octets = ipMatch.slice(1).map(Number);
+      
+      // Validate octet ranges
+      if (octets.some(o => o > 255)) {
+        return { valid: false, error: 'Invalid IP address' };
+      }
+      
+      // Check private/reserved ranges
+      if (
+        octets[0] === 10 || // 10.0.0.0/8
+        (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) || // 172.16.0.0/12
+        (octets[0] === 192 && octets[1] === 168) || // 192.168.0.0/16
+        (octets[0] === 169 && octets[1] === 254) || // Link-local / AWS metadata
+        octets[0] === 127 || // Loopback
+        octets[0] === 0 || // Current network
+        (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127) || // Carrier-grade NAT
+        (octets[0] === 198 && octets[1] >= 18 && octets[1] <= 19) // Benchmark testing
+      ) {
+        return { valid: false, error: 'Private IP addresses not allowed' };
+      }
+    }
+    
+    // Block cloud metadata endpoints
+    const blockedHosts = [
+      'metadata.google.internal',
+      'metadata.goog',
+      'instance-data',
+      'metadata.azure.com',
+      'metadata.azure.internal',
+      '169.254.169.254',
+      'fd00:ec2::254',
+    ];
+    if (blockedHosts.some(blocked => hostname.includes(blocked))) {
+      return { valid: false, error: 'Metadata endpoints not allowed' };
+    }
+    
+    // Block .local, .internal, .localhost TLDs
+    if (hostname.endsWith('.local') || hostname.endsWith('.internal') || hostname.endsWith('.localhost')) {
+      return { valid: false, error: 'Internal domain names not allowed' };
+    }
+    
+    return { valid: true };
+  } catch (e) {
+    return { valid: false, error: 'Invalid URL format' };
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -62,6 +130,16 @@ serve(async (req) => {
     let formattedUrl = url.trim();
     if (!formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
       formattedUrl = `https://${formattedUrl}`;
+    }
+
+    // Validate URL against SSRF attacks
+    const validation = isValidPublicUrl(formattedUrl);
+    if (!validation.valid) {
+      console.error('URL validation failed:', validation.error);
+      return new Response(
+        JSON.stringify({ success: false, error: validation.error }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     console.log('Crawling URL:', formattedUrl);
