@@ -190,54 +190,75 @@ serve(async (req) => {
     const sections = crawlData.extractedDesign?.sections || [];
     const markdown = crawlData.markdown?.substring(0, 8000) || '';
 
-    const systemPrompt = `You are an elite frontend architect who generates production-ready React code. You create beautiful, responsive websites inspired by analyzed designs but with ORIGINAL content.
+    const systemPrompt = `You are an elite frontend architect who replicates website designs. Your goal is to create a website that VISUALLY MATCHES the original as closely as possible while using original content.
 
-CRITICAL RULES:
-1. NEVER copy text verbatim - create semantically similar but original content
-2. Use the provided color palette and typography
-3. Generate clean, well-structured React/TypeScript code
-4. Use Tailwind CSS for styling
-5. Make it fully responsive
-6. Include smooth animations and transitions
-7. Follow accessibility best practices
+CRITICAL REQUIREMENTS:
+1. MATCH THE LAYOUT EXACTLY - same section order, same component placement, same grid structures
+2. MATCH THE VISUAL STYLE - colors, spacing, typography sizes, button styles, card designs
+3. REPLACE text with similar but original content (same tone, length, and purpose)
+4. Use Tailwind CSS with the exact colors from the original
+5. Include ALL sections visible in the original
+6. Match hover effects, shadows, borders, and visual details
 
 OUTPUT FORMAT:
 Return a valid JSON object with this exact structure:
 {
-  "pageCode": "// Full React component code here",
+  "pageCode": "// Full React component code - MUST be complete and runnable",
   "designTokens": {
-    "colors": { "primary": "#...", "secondary": "#...", ... },
-    "fonts": { "heading": "...", "body": "..." }
+    "colors": { "primary": "#hex", "secondary": "#hex", "background": "#hex", "text": "#hex", "accent": "#hex" },
+    "fonts": { "heading": "FontName", "body": "FontName" }
   },
-  "sections": ["Hero", "Features", ...]
+  "sections": ["Section1", "Section2", ...]
 }`;
 
-    const userPrompt = `Analyze this website content and generate a SIMILAR but ORIGINAL website:
+    // Build messages array - include screenshot if available for vision
+    const messages: any[] = [
+      { role: 'system', content: systemPrompt },
+    ];
 
-**Original Website Info:**
+    const userPromptText = `Replicate this website's visual design and layout:
+
+**Website Details:**
+- URL: ${crawlData.url}
 - Title: ${crawlData.title}
 - Description: ${crawlData.description}
-- Detected Sections: ${sections.join(', ')}
-- Color Palette: ${colors.join(', ')}
-- Typography: ${fonts.join(', ')}
 
-**Content Structure (for inspiration only - DO NOT COPY):**
-${markdown.substring(0, 4000)}
+**Detected Design Elements:**
+- Sections: ${sections.join(', ') || 'Hero, Features, CTA, Footer'}
+- Colors: ${colors.join(', ') || 'Not detected - use modern dark theme'}
+- Fonts: ${fonts.join(', ') || 'Inter, system-ui'}
 
-**Generation Options:**
-- Landing Page Only: ${options?.landingPageOnly ?? true}
-- Mobile First: ${options?.mobileFirst ?? true}
+**Content Structure:**
+${markdown.substring(0, 6000)}
+
+**Options:**
 - Dark Mode: ${options?.darkMode ?? false}
+- Mobile First: ${options?.mobileFirst ?? true}
 
-Generate a complete, production-ready React component that is INSPIRED by this design but with:
-1. Original headline and copy (similar tone but different words)
-2. The same general layout structure
-3. The detected color palette (or similar complementary colors)
-4. Modern animations using CSS/Tailwind
-5. Semantic HTML structure
-6. Responsive design
+IMPORTANT: Generate code that creates a page that looks VISUALLY IDENTICAL to the original. Match:
+- Header/navigation style exactly
+- Hero section layout, button placement, text hierarchy
+- Feature cards/grids with same column count
+- Testimonials, pricing tables if present
+- Footer layout and link organization
+- All spacing, padding, and visual details
 
-Return ONLY valid JSON with the pageCode, designTokens, and sections fields.`;
+Use Tailwind classes. Make it responsive. Return ONLY valid JSON.`;
+
+    // If screenshot is available, use vision model
+    if (crawlData.screenshot && crawlData.screenshot.startsWith('data:image')) {
+      console.log('Using vision model with screenshot');
+      messages.push({
+        role: 'user',
+        content: [
+          { type: 'text', text: userPromptText + '\n\nLook at the screenshot below and replicate its exact visual design:' },
+          { type: 'image_url', image_url: { url: crawlData.screenshot } }
+        ]
+      });
+    } else {
+      console.log('No screenshot available, using text-only generation');
+      messages.push({ role: 'user', content: userPromptText });
+    }
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -246,12 +267,9 @@ Return ONLY valid JSON with the pageCode, designTokens, and sections fields.`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        max_tokens: 8000,
+        model: 'google/gemini-2.5-pro', // Use pro model for better quality
+        messages,
+        max_tokens: 12000,
       }),
     });
 
